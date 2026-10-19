@@ -19,7 +19,7 @@ curl -fsSL https://install.fluxomni.io | bash
 
 By default, Fluxomni Studio installs to `~/fluxomni` and uses the newest stable release channel (`latest`).
 The installer creates one Docker Compose stack and stores data in `./data`.
-The web UI is included in the default install.
+The web UI is included in the default install. The public launcher selects the stable release's matching installer and Compose assets, including its file-limit repair. Existing installs keep their saved version unless you set `FLUXOMNI_VERSION` explicitly. A saved `latest` continues following stable.
 
 ## Install with Custom Values
 
@@ -32,34 +32,43 @@ FLUXOMNI_VERSION=edge \
   bash
 ```
 
-To pin a stable release, set `FLUXOMNI_VERSION=v26.3.2` or another public `vYY.Q.N` tag.
+To pin a stable release, set `FLUXOMNI_VERSION=v26.3.2` or another public `vYY.Q.N` tag. The versioned URL `https://install.fluxomni.io/v26.3.2` also pins that release and uses the same corrected installer bundle. Older public aliases pass the mapped core image tag to historical installers.
 
 Use `FLUXOMNI_SELFHOST_REF` only when the config files must come from a different ref.
 
 ## Attach Another Media Node
 
-Before attaching a remote media node, expose `50052/tcp` from the main
-control-plane host only to trusted node IPs. For direct binding, set
-`FLUXOMNI_CONTROL_PLANE_RPC_PORT=50052` in the main install's `.env`,
-restart the stack, and restrict access with a firewall.
+Use the procedure for the same release as your control plane. The `media-node` install target remains supported by the public command.
 
-Run this on the remote media server:
+### Stable v26.3.2
+
+The current stable release uses its published HTTP control and shared-token contract. Run this on the remote host after exposing the control listener only to trusted node IPs:
 
 ```bash
 curl -fsSL https://install.fluxomni.io | \
-FLUXOMNI_VERSION=edge \
 FLUXOMNI_CONTROL_PLANE_RPC_ENDPOINT=http://control.example.com:50052 \
 FLUXOMNI_CONTROL_PLANE_INTERNAL_AUTH_TOKEN=replace-with-shared-token \
 FLUXOMNI_MEDIA_NODE_PUBLIC_HOST=media2.example.com \
   bash -s -- media-node
 ```
 
-The installer writes files to `~/fluxomni-media-node`. It checks that it can reach the main Fluxomni Studio server before it starts.
-Set `FLUXOMNI_MEDIA_NODE_PUBLIC_HOST` to the real hostname or IP for this media server.
+The launcher selects the stable installer and assets together. The current v26.3.2 bundle is pinned to an immutable self-host snapshot that keeps the 65,536 file limit and published media-port fixes. For a pin, set the same published version as the control plane on the `bash` side of the pipe. Repeating that command uses the saved release and the same release's update behavior.
 
-Set `FLUXOMNI_MEDIA_NODE_ENDPOINT` only when the media server uses a custom gRPC endpoint.
+### Fleet enrollment on edge and supporting releases
 
-You can also set `FLUXOMNI_MEDIA_NODE_ID`, `FLUXOMNI_MEDIA_NODE_NAME`, `FLUXOMNI_MEDIA_NODE_LABELS`, and `FLUXOMNI_MEDIA_NODE_ZONE`.
+Fleet enrollment requires matching control-plane and media-node images that support it. Until a supporting stable release is published, use `edge` for both and select `edge` in the Fleet join command. Existing stable credentials are not imported into the new control protocol. Use the documented [replacement procedure](capacity-upgrades.md) when moving an existing node.
+
+Open Fleet → Add Node as an Admin. Choose the node ID and name, then select Generate join command. Copy the command and run it on the remote node host.
+
+The command contains a fifteen-minute, single-use enrollment code. The installer creates and saves a machine credential before redeeming the code over verified HTTPS. The control plane stores its hash; the machine secret never passes through the browser.
+
+The enrollment HTTPS origin and outbound control endpoint must be reachable from the node. Their certificates must match their hostnames. Fleet includes the control listener certificate as a pin. Advanced settings can use a stable issuing CA instead. Update the saved trust file when a pinned certificate is renewed. Use the separate enrollment HTTPS CA field for a private HTTPS origin.
+
+A VPN, public node address and inbound node control port are optional. Leave the public host and HTTP relay host empty for a private node with no published ports. Configure media hosts only when publishers, viewers or HTTP relays need them.
+
+Fleet distinguishes a consumed code from a connected node. After redemption, the existing outbound TLS handshake completes registration. Codes can be cancelled in Add Node, and expired codes can be replaced before successful enrollment.
+
+The installer keeps credentials in owner-only `node-secrets/` under `~/fluxomni-media-node`. Repeating an interrupted installation reuses the saved secret. For a node that already started, follow [Capacity Ledger Upgrades](capacity-upgrades.md) before recreating it; maintenance reruns do not repeat enrollment.
 
 ## Access the Operator UI
 
@@ -73,15 +82,15 @@ Current releases use these main pages:
 ## Manual Install
 
 ```bash
-ASSET_REF=main # or a published versioned self-host ref, for example v26.3.2
+ASSET_REF=f4a0b3b0c72da80dd889ef4a51f637537dd89406 # Corrected v26.3.2 assets.
 mkdir -p ~/fluxomni
 cd ~/fluxomni
 curl -fsSL "https://raw.githubusercontent.com/fluxomnia-systems/fluxomni-selfhost/${ASSET_REF}/docker-compose.yml" -o docker-compose.yml
 curl -fsSL "https://raw.githubusercontent.com/fluxomnia-systems/fluxomni-selfhost/${ASSET_REF}/.env.example" -o .env.example
 AUTH_TOKEN="$(openssl rand -hex 24)"
-IMAGE_TAG="${ASSET_REF}"
+IMAGE_TAG=v26.3.2
 if [ "${IMAGE_TAG}" = "main" ]; then
-  IMAGE_TAG="latest"
+  IMAGE_TAG="edge"
 elif [[ "${IMAGE_TAG#v}" =~ ^[0-9]{2}\.[1-4]\.[0-9]+$ ]]; then
   VERSION_MAP="$(mktemp)"
   curl -fsSL "https://raw.githubusercontent.com/fluxomnia-systems/fluxomni-selfhost/${ASSET_REF}/scripts/generated-version-map.sh" -o "${VERSION_MAP}"
@@ -136,3 +145,19 @@ docker compose --profile auto-update stop watchtower
 
 For per-node playlist normalization CPU/memory/thread budgets, see
 [Offline Preparation Resource Limits](configuration.md#offline-preparation-resource-limits).
+
+If redemption loses its response, the installer keeps the same credential and confirms it through the outbound control connection. Rerun the original command after an interrupted install. Never delete `node-secrets/` to retry.
+
+## Legacy shared-token nodes
+
+Legacy shared-token nodes require replacement enrollment; the installer does not import shared tokens or retain the old HTTP control protocol.
+
+Drain legacy routes and prove predecessor execution stopped through [Capacity Ledger Upgrades](capacity-upgrades.md). Preserve the existing data, ownership ledger and configuration. With the current control plane running, create a fresh node ID in Fleet and run its join command with `FLUXOMNI_DIR` set to a new installation directory. Verify the new node before enabling routes. The in-place node upgrade command applies to installations that already have `node-secrets/`.
+
+## Changing the control certificate host
+
+An existing certificate must cover the advertised control host. Bootstrap rejects a missing name while preserving the existing certificate and key.
+
+Through the capacity maintenance procedure, stop execution, preserve the old certificate and key, install the replacement covering the control host and update every node trust file. Restart and verify Fleet before enabling routes. A stable issuing CA avoids replacing the trust anchor at each certificate renewal.
+
+Bootstrap also requires an explicit trust transition for expiring or incomplete certificate/key pairs. It preserves existing files and node trust instead of silently creating a new pin.

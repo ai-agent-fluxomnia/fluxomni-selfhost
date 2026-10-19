@@ -2,6 +2,20 @@
 
 Installer contracts for full stacks and standalone media nodes.
 
+## One-time node enrollment
+
+Fleet issues a fifteen-minute code for one fresh node. The installer saves its random machine credential before exchanging the code and credential hash over verified HTTPS.
+
+Owner-only `node-secrets/` contains the credential, public CA files, bound identity and enrollment receipt. The directory is mounted read-only into the node. Codes and plaintext credentials never enter `.env` or diagnostic output. Ambiguous responses are confirmed through this boot's outbound Hello/Welcome. Interrupted installs can retry admission with the saved credential without another code. A saved receipt skips redemption on later starts.
+
+The node opens its outbound TLS Hello/Welcome connection after redemption. Private nodes publish no ports. Public ingest/playback and HTTP media relay settings each enable only their own media ports. A full installation bootstraps its colocated node through the same credential authority before the control plane starts.
+
+## Enrollment recovery coverage
+
+Installer tests verify owner-only credential storage, exact retries after response loss, reuse without a new code, bound identity, HTTPS trust and optional public media ports.
+
+The simulated redemption endpoint records only node IDs and credential hashes. Real Docker acceptance uses the current control-plane redemption service and existing outbound admission.
+
 ## Media-node file limits
 
 Both Compose templates set soft/hard `nofile` to 65,536. The installer fills missing limits in downloaded assets, including v26.3.2.
@@ -148,3 +162,45 @@ An installer-owned version/target marker permits retrying an incomplete bootstra
 ## Incomplete fresh installation retry tests
 
 Failed pulls and startup attempts before resource creation can retry; mismatched markers and runtime or durable-state evidence cannot bypass maintenance.
+
+## Independent HTTP relay selection
+
+An empty HTTP relay host stays empty even when public ingest is configured. The installer preserves that choice in the saved environment and does not publish port 8004 on retries.
+
+Legacy shared-token nodes use fresh enrollment after capacity maintenance; no shared-token import or old control protocol is preserved.
+
+## HTTPS control preflight defaults
+
+The connectivity preflight uses port 443 for HTTPS endpoints without an explicit port, including bracketed IPv6 hosts. Explicit endpoint ports stay unchanged.
+
+## Public release selection
+
+The public launcher selects installer code and Compose assets from one release before changing installation files.
+
+Explicit version values override the saved installation version; otherwise the default is latest. Latest resolves to the generated stable ref while retaining the latest image channel. Historical releases declare their root installer in release metadata. New releases and edge use scripts/install-runtime.sh. Missing files fail without falling back to main. Stable historical code owns its release's admission and update contract; the new runtime adds no legacy protocol adapter.
+
+Current stable v26.3.2 uses bundle f4a0b3b0c72da80dd889ef4a51f637537dd89406. Its installer and all helper/assets downloads share that SHA, retaining the file-limit, media-port and preparation fixes without requiring the newer capacity API. The image channel stays latest or the requested version. The manual installation example uses the same corrected asset SHA with the v26.3.2 image pin.
+
+Release sync preserves declared historical installer paths and same-release bundle overrides and assigns the current path to new releases. Custom asset roots require the current runtime installer. Caller working directories never supply executable version maps. Enrollment commands cannot be sent to historical installers.
+
+## Public release selection tests
+
+Launcher tests verify stable and edge selection, saved versions, explicit overrides, argument and exit propagation, missing-bundle safety and generated release paths.
+
+Real release acceptance additionally runs downloaded stable installers with their published Compose bundles using a simulated Docker lifecycle and real Compose rendering. Matching-runtime Docker acceptance verifies the new enrollment protocol separately.
+
+## Versioned public installer URLs
+
+The install proxy serves the release-aware launcher for versioned URLs and passes the URL version explicitly to prevent latest-channel drift.
+
+The launcher then resolves the same corrected stable bundle used by environment pins. Historical alias fallback passes the core image tag as well as the core asset ref to installers that predate public tag normalization. Proxy responses stream the launcher after the version prefix; missing upstream launchers fail without a moving-version fallback.
+
+## Public proxy pin tests
+
+Worker tests execute returned scripts to verify URL pins, corrected-bundle launcher selection, unchanged default dispatch and failure responses.
+
+## Manual release pair tests
+
+The manual Bash example's asset and image assignments must resolve to the stable bundle and core image tag declared by release metadata.
+
+The regression executes those assignments and checks their resolved values. Separate manual command acceptance downloads the actual bundle and renders Compose to verify image tags, file limits and stable services.
